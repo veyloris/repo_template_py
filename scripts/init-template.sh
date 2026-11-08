@@ -102,7 +102,7 @@ echo "==> Dating D-001"
 sed -i "s|REPLACE-DATE|$(date +%F)|" docs/DECISIONS.md
 
 # The todo this script just finished should not outlive it.
-sed -i '/^- Replace the .* placeholders via .\/scripts\/init-template\.sh.$/d' AGENTS.md
+sed -i '/^- Replace the .* placeholders via .*init-template\.sh/d' AGENTS.md
 
 # Re-lock under the new name and prove the renamed tree works before the
 # script deletes itself. A half-renamed tree that reports success is worse
