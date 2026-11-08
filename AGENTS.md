@@ -108,8 +108,10 @@ hand-editing is required here.
 - **Ignore files:** `.trivyignore.yaml` (repo root), YAML form, wired through the
   `trivyignores` input on the scan step.
 - **Pin locations:** `uv.lock` (every runtime and dev dependency, with hashes),
-  bounded by the specifiers in `pyproject.toml`. No container image or tool
-  binary is built, so nothing else is CVE-gated.
+  bounded by the specifiers in `pyproject.toml`. Trivy gates the runtime
+  dependencies only: it leaves the dev group out by default, and the dev tools
+  never ship to users. No container image or tool binary is built, so nothing
+  else is CVE-gated.
 - **Pre-authorized merges:** trivyignore entries, dependency bumps, and green
   Renovate PRs may be self-merged. Secrets and workflow permissions are not.
 - **Repo notes:**

@@ -23,7 +23,8 @@ project only once it is configured that way.
   policy is enforced through [.github/zizmor.yml](../../.github/zizmor.yml):
   every action is pinned to a full commit SHA with the tag in a trailing
   comment. Renovate keeps these digests and the lock current.
-- Dependency CVEs are gated by Trivy in the same workflow. The gate's facts
+- Runtime dependency CVEs are gated by Trivy in the same workflow, which reads
+  `uv.lock` and leaves the dev group out by default. The gate's facts
   (severity, ignore file, pin locations) live in the "CVE triage manifest"
   section of [AGENTS.md](../../AGENTS.md), which the `/cve-ci-triage` skill
   consumes.
