@@ -1,0 +1,44 @@
+# Virtual environment (uv sync creates it; uv.lock is the committed record)
+.venv/
+
+# Bytecode
+__pycache__/
+*.py[cod]
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.Identifier
+
+# Environments / secrets
+.env
+.envrc
+
+# History
+.history/
+
+# Cache
+.cache/
+
+# Claude Code parallel-session worktrees
+.claude/worktrees/

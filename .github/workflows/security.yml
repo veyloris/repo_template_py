@@ -1,0 +1,93 @@
+name: Security Scans
+
+# Defense-in-depth scans complementing the checks in validate.yml:
+#   - Trivy filesystem scan: CVEs in the locked dependencies (uv.lock), IaC misconfigs
+#   - TruffleHog: secret detection on the PR diff (gitleaks runs locally
+#     via pre-commit; this is the CI gate for anyone who bypasses it)
+#   - Zizmor: GitHub Actions workflow security audit
+#
+# All three invoke public scanners directly (hash-pinned); no org-internal
+# reusable workflows. Note for restricted self-hosted runners
+# (Kubernetes-mode ARC): the TruffleHog action is Docker-based and will not
+# run there -- invoke the trufflehog binary directly instead.
+
+# Triggers: PRs gate changes pre-merge; a merged PR's content was already
+# scanned, so there is no push trigger (each merge would pay for a second,
+# identical scan within minutes). The weekly schedule re-scans main for
+# newly published CVEs that Trivy would otherwise only catch on the next PR.
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 14 * * 1" # Monday morning
+  workflow_dispatch:
+
+# Rapid successive pushes to the same PR supersede each other; cancel the
+# stale run instead of paying for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  trivy-repo-scan:
+    name: Trivy Repository Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # A single YAML file is passed to Trivy verbatim (the action only
+          # concatenates plain-text ignore files), so `expired_at` is honored.
+          trivyignores: .trivyignore.yaml
+          exit-code: "1"
+
+  trufflehog:
+    name: TruffleHog Secret Scan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: TruffleHog diff scan
+        uses: trufflesecurity/trufflehog@27b0417c16317ca9a472a9a8092acce143b49c55 # v3.95.9
+        with:
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --results=verified,unknown
+
+  zizmor:
+    name: Zizmor Workflow Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # uv is NOT preinstalled on GitHub-hosted runner images; install it
+      # explicitly rather than assuming the runner provides it. setup-uv is a
+      # node action, so this also works on Kubernetes-mode self-hosted runners.
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Zizmor audit
+        # Run zizmor via uvx rather than the Docker-backed zizmor-action, so
+        # this job also works unchanged on Kubernetes-mode runners. Config
+        # auto-loads from .github/zizmor.yml; non-zero exit on findings.
+        # GH_TOKEN enables the online audits -- including
+        # ref-version-mismatch, which is why the pins below carry exact patch
+        # versions (# v7.0.1) rather than floating majors (# v7): when
+        # upstream moves a floating tag, a major-only comment fails the audit.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uvx zizmor==1.27.0 .
