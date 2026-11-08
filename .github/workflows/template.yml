@@ -1,0 +1,62 @@
+name: Template
+
+# Exercises scripts/init-template.sh on a throwaway copy, so a template change
+# that breaks instantiation fails here instead of in the next new repo. The
+# init script deletes this workflow, so instantiated repos never run it.
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    name: Instantiate with init-template.sh
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The GitHub "Use this template" flow (files tracked) and the manual
+        # `rm -rf .git && git init` flow (nothing tracked).
+        flow: [tracked, fresh-init]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Instantiate
+        env:
+          FLOW: ${{ matrix.flow }}
+        run: |
+          copy="$RUNNER_TEMP/instance"
+          git clone -q . "$copy"
+          cd "$copy"
+          if [[ "$FLOW" == fresh-init ]]; then
+            rm -rf .git
+            git init -q
+          fi
+          ./scripts/init-template.sh acme/widget-tool-with-a-long-name widget-tool-with-a-long-name
+          test ! -e scripts/init-template.sh
+          test ! -e .github/workflows/template.yml
+          test -d src/widget_tool_with_a_long_name
+          grep -q 'github.com/acme/widget-tool-with-a-long-name$' AGENTS.md
+          uv run --frozen widget-tool-with-a-long-name version
+
+      - name: Refuses a name containing a placeholder
+        run: |
+          copy="$RUNNER_TEMP/refused"
+          git clone -q . "$copy"
+          cd "$copy"
+          if ./scripts/init-template.sh acme/my-app-cli my-app-cli; then
+            echo "init accepted a placeholder-containing name" >&2
+            exit 1
+          fi
+          git diff --quiet

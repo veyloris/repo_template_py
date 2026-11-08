@@ -1,0 +1,122 @@
+exclude: |
+  (?x)^(
+      \.history/.*|
+      .*cache.*/.*|
+  )$
+fail_fast: true
+default_install_hook_types:
+  - pre-commit
+  - pre-push
+# Hooks without an explicit `stages:` run only at commit; the pre-push stage
+# below is opt-in (tests), so installing pre-push does not double-run the
+# lint/format hooks on every push.
+default_stages:
+  - pre-commit
+repos:
+  # ----------------------------- Security Tools ----------------------------- #
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        name: "security - Detect hardcoded secrets"
+
+  # ---------------------------- Python Quality ------------------------------ #
+
+  # Local hooks run the dev tools from uv.lock, so pre-commit and CI use the
+  # same versions and there is no second pin to drift. --frozen never edits
+  # the lock from inside a hook. They check the whole tree and also fire on a
+  # pyproject.toml change, because that is where the ruff and pyright
+  # settings live: loosening them must still run the checks.
+  - repo: local
+    hooks:
+      - id: uv-lock-check
+        name: "python - uv.lock matches pyproject.toml"
+        entry: uv lock --check
+        language: system
+        files: '^(pyproject\.toml|uv\.lock)$'
+        pass_filenames: false
+      - id: ruff-check
+        name: "python - Lint with ruff"
+        entry: uv run --frozen ruff check --fix .
+        language: system
+        files: '(\.pyi?|^pyproject\.toml)$'
+        pass_filenames: false
+      - id: ruff-format
+        name: "python - Format with ruff"
+        entry: uv run --frozen ruff format .
+        language: system
+        files: '(\.pyi?|^pyproject\.toml)$'
+        pass_filenames: false
+      - id: pyright
+        name: "python - Type-check with pyright (strict)"
+        entry: uv run --frozen pyright
+        language: system
+        files: '(\.pyi?|^pyproject\.toml)$'
+        pass_filenames: false
+      # Tests are pre-PUSH, not pre-commit, so trivial breakage never burns a
+      # CI run but commits stay fast.
+      - id: pytest
+        name: "python - Test with pytest (pre-push)"
+        entry: uv run --frozen pytest -q
+        language: system
+        files: '(\.pyi?|^pyproject\.toml|^uv\.lock)$'
+        pass_filenames: false
+        stages: [pre-push]
+
+  # ------------------------- Data & Config Validation ----------------------- #
+
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.39.0
+    hooks:
+      - id: check-github-workflows
+        name: "github-actions - Validate gh workflow files"
+        args: ["--verbose"]
+      - id: check-renovate
+        name: "renovate - Validate Renovate configuration"
+
+  # --------------------------------- Shell ---------------------------------- #
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        name: "shell - Lint shell scripts"
+
+  - repo: https://github.com/openstack/bashate
+    rev: 2.1.1
+    hooks:
+      - id: bashate
+        name: "shell - Check shell script code style"
+        # E006 is a 79-column limit; shellcheck and review cover readability.
+        args: ["--ignore=E006"]
+
+  # ----------------------------- Filesystem / Git --------------------------- #
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-toml
+        name: "filesystem - Validate TOML"
+      - id: check-executables-have-shebangs
+        name: "filesystem - Verify shebang presence"
+      - id: check-shebang-scripts-are-executable
+        name: "filesystem - Verify script permissions"
+      - id: check-case-conflict
+        name: "filesystem - Check case sensitivity"
+      - id: check-illegal-windows-names
+        name: "filesystem - Validate Windows filenames"
+      - id: check-symlinks
+        name: "filesystem - Check symlink validity"
+      - id: destroyed-symlinks
+        name: "filesystem - Detect broken symlinks"
+      - id: check-merge-conflict
+        name: "git - Detect conflict markers"
+      - id: forbid-new-submodules
+        name: "git - Prevent submodule creation"
+      - id: no-commit-to-branch
+        name: "git - Protect main branches"
+        args: ["--branch", "main", "--branch", "master"]
+      - id: check-added-large-files
+        name: "git - Block large file commits"
+        args: ["--maxkb=5000"]
