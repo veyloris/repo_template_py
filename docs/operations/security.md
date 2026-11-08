@@ -16,15 +16,21 @@ project only once it is configured that way.
 - Dependencies are locked in `uv.lock` with hashes. CI installs with
   `uv sync --locked`, which fails on a lock that is stale against
   `pyproject.toml` and verifies every download against its recorded hash.
+  Two things sit outside the lock: the build backend (`uv_build`, bounded by
+  `[build-system]` in `pyproject.toml`) and pyright's Node runtime, which the
+  pyright package downloads on first run.
 - Dev tools (ruff, pyright, pytest) are dependencies in the same lock, so
   pre-commit and CI run the exact versions a developer runs.
 - GitHub Actions workflows are audited by zizmor on every PR (see
   [security.yml](../../.github/workflows/security.yml)). The action pinning
   policy is enforced through [.github/zizmor.yml](../../.github/zizmor.yml):
   every action is pinned to a full commit SHA with the tag in a trailing
-  comment. Renovate keeps these digests and the lock current.
+  comment. Renovate bumps these digests and the dependency specifiers. The
+  TruffleHog step also names its scanner image version, which Renovate does
+  not track; keep it equal to the action's tag.
 - Runtime dependency CVEs are gated by Trivy in the same workflow, which reads
-  `uv.lock` and leaves the dev group out by default. The gate's facts
+  `uv.lock` and leaves the dev group out by default. With no runtime
+  dependencies the gate has nothing to scan. The gate's facts
   (severity, ignore file, pin locations) live in the "CVE triage manifest"
   section of [AGENTS.md](../../AGENTS.md), which the `/cve-ci-triage` skill
   consumes.
@@ -35,7 +41,10 @@ project only once it is configured that way.
 ## Secrets
 
 - Secrets never appear in git, CI logs, or build artifacts. gitleaks runs in
-  pre-commit and TruffleHog in CI to catch the cases where that rule slips.
+  pre-commit and is the broad net. TruffleHog in CI is narrower: it scans each
+  PR's diff and reports verified and unknown results only, so an
+  unverifiable generic key that skipped the local hook passes CI. It does not
+  run on direct pushes, so the CI layer holds only if `main` requires PRs.
 - Configuration that carries a secret is read from the environment at run
   time; `.env` and `.envrc` are gitignored.
 

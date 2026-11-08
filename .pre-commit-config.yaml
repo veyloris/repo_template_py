@@ -6,7 +6,6 @@ exclude: |
 fail_fast: true
 default_install_hook_types:
   - pre-commit
-  - commit-msg
   - pre-push
 # Hooks without an explicit `stages:` run only at commit; the pre-push stage
 # below is opt-in (tests), so installing pre-push does not double-run the
@@ -26,7 +25,9 @@ repos:
 
   # Local hooks run the dev tools from uv.lock, so pre-commit and CI use the
   # same versions and there is no second pin to drift. --frozen never edits
-  # the lock from inside a hook.
+  # the lock from inside a hook. They check the whole tree and also fire on a
+  # pyproject.toml change, because that is where the ruff and pyright
+  # settings live: loosening them must still run the checks.
   - repo: local
     hooks:
       - id: uv-lock-check
@@ -37,19 +38,21 @@ repos:
         pass_filenames: false
       - id: ruff-check
         name: "python - Lint with ruff"
-        entry: uv run --frozen ruff check --fix --force-exclude
+        entry: uv run --frozen ruff check --fix .
         language: system
-        types_or: [python, pyi]
+        files: '(\.pyi?|^pyproject\.toml)$'
+        pass_filenames: false
       - id: ruff-format
         name: "python - Format with ruff"
-        entry: uv run --frozen ruff format --force-exclude
+        entry: uv run --frozen ruff format .
         language: system
-        types_or: [python, pyi]
+        files: '(\.pyi?|^pyproject\.toml)$'
+        pass_filenames: false
       - id: pyright
         name: "python - Type-check with pyright (strict)"
         entry: uv run --frozen pyright
         language: system
-        types_or: [python, pyi]
+        files: '(\.pyi?|^pyproject\.toml)$'
         pass_filenames: false
       # Tests are pre-PUSH, not pre-commit, so trivial breakage never burns a
       # CI run but commits stay fast.
@@ -57,7 +60,7 @@ repos:
         name: "python - Test with pytest (pre-push)"
         entry: uv run --frozen pytest -q
         language: system
-        types_or: [python, pyi]
+        files: '(\.pyi?|^pyproject\.toml|^uv\.lock)$'
         pass_filenames: false
         stages: [pre-push]
 
@@ -85,6 +88,8 @@ repos:
     hooks:
       - id: bashate
         name: "shell - Check shell script code style"
+        # E006 is a 79-column limit; shellcheck and review cover readability.
+        args: ["--ignore=E006"]
 
   # ----------------------------- Filesystem / Git --------------------------- #
 

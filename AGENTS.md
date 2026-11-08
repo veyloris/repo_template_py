@@ -7,6 +7,7 @@ hash-pinned actions, secret and CVE scanning) are described in
 
 ### Unfinished Todos
 - Replace the `my-app` / `my_app` / `myorg` placeholders via `./scripts/init-template.sh`
+- Write the project description in `pyproject.toml` and `src/my_app/cli.py`
 - Confirm `LICENSE` fits this project (the template ships MIT)
 - Adjust `docs/operations/security.md` once the project has real integrations
 - Confirm the "CVE triage manifest" section below reflects this project's real
@@ -20,11 +21,11 @@ hash-pinned actions, secret and CVE scanning) are described in
 - Type-check: `uv run pyright` (strict)
 - Run: `uv run my-app --help`
 - Install as a tool: `uv tool install .`
-- Hooks: `pre-commit install` once per clone (installs commit, commit-msg,
-  and pre-push hooks; tests run at pre-push)
+- Hooks: `pre-commit install` once per clone (installs the commit and
+  pre-push hooks; tests run at pre-push)
 - Add a dependency: `uv add <pkg>` (dev tool: `uv add --dev <pkg>`); commit
   `pyproject.toml` and `uv.lock` together
-- Security scans: [security.yml](.github/workflows/security.yml) runs Trivy filesystem, TruffleHog, and zizmor on every PR (hash-pinned public scanners)
+- Security scans: [security.yml](.github/workflows/security.yml) runs Trivy filesystem, TruffleHog, and zizmor on every PR (pinned public scanners)
 
 ## Key Paths
 | Path | Purpose |
@@ -42,8 +43,10 @@ hash-pinned actions, secret and CVE scanning) are described in
 - **stdlib first**: argparse for the CLI, `logging` for diagnostics,
   `pathlib` for paths. A third-party dependency earns its place with a D-###
   entry.
-- **src layout**: tests import the installed package, never the working tree,
-  so a packaging mistake fails in tests rather than for users.
+- **src layout**: the package is importable only once installed, never from
+  the working directory by accident. `uv sync` installs it editable, so the
+  tests read `src/` directly; CI also builds the wheel and runs its console
+  script, which is where a packaging mistake shows up.
 - **Typed package**: `py.typed` ships, and pyright runs strict over `src` and
   `tests`.
 
@@ -95,9 +98,9 @@ conflict to the user and ask for input.
 
 Consumed by the `/cve-ci-triage` skill (user-level, `~/.claude/skills/`). The
 skill is the method; this section is this repository's facts. A repo cut from
-this template is onboarded by running `./scripts/init-template.sh`, which
-rewrites the `Repository` field below along with every other placeholder. No
-hand-editing is required here.
+this template had its `Repository` field below rewritten by the template's
+init script. The other fields describe the template's workflows; confirm them
+whenever a workflow changes.
 
 - **Repository:** github.com/myorg/my-app
 - **Ecosystem:** python (`uv.lock`)
@@ -110,8 +113,9 @@ hand-editing is required here.
 - **Pin locations:** `uv.lock` (every runtime and dev dependency, with hashes),
   bounded by the specifiers in `pyproject.toml`. Trivy gates the runtime
   dependencies only: it leaves the dev group out by default, and the dev tools
-  never ship to users. No container image or tool binary is built, so nothing
-  else is CVE-gated.
+  never ship to users. Until the project declares a runtime dependency the
+  gate has nothing to scan, so a green run there means nothing yet. No
+  container image or tool binary is built, so nothing else is CVE-gated.
 - **Pre-authorized merges:** trivyignore entries, dependency bumps, and green
   Renovate PRs may be self-merged. Secrets and workflow permissions are not.
 - **Repo notes:**

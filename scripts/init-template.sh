@@ -10,10 +10,18 @@
 # The distribution name is what `uv tool install` and the console script use
 # (widget-tool); the import name is derived from it (widget_tool). This
 # rewrites every placeholder across the working tree (myorg/my-app, my-app,
-# my_app, MY_APP_), renames src/my_app/, dates the scaffold decision in
-# docs/DECISIONS.md, re-locks, runs the checks, and deletes itself.
+# my_app), renames src/my_app/, dates the scaffold decision in
+# docs/DECISIONS.md, removes the template-only workflow, re-locks, runs the
+# checks, and deletes itself.
+#
+# Needs bash 4+ and GNU sed (Linux, or gnu-sed on macOS).
 
 set -euo pipefail
+
+if ((BASH_VERSINFO[0] < 4)); then
+    echo "error: needs bash 4 or newer (this is $BASH_VERSION)" >&2
+    exit 1
+fi
 
 if [[ $# -ne 2 ]]; then
     echo "usage: $0 <owner/repo> <distribution-name>" >&2
@@ -23,7 +31,17 @@ fi
 
 REPO="$1"
 DIST="$2"
+OLD_REPO="myorg/my-app"
+OLD_DIST="my-app"
+OLD_IMPORT="my_app"
+IMPORT="${DIST//-/_}"
 
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+SELF="$ROOT/scripts/init-template.sh"
+cd "$ROOT"
+
+# Every check that can reject the input runs before the first file changes,
+# so a refused name leaves the template untouched.
 if [[ ! "$REPO" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]; then
     echo "error: repository '$REPO' does not look like owner/repo" >&2
     exit 1
@@ -32,27 +50,42 @@ fi
 # A normalized distribution name: lowercase, hyphen-separated, so the derived
 # import name is a valid Python identifier.
 if [[ ! "$DIST" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; then
-    echo "error: distribution name '$DIST' must be lowercase letters and digits, words joined by single hyphens" >&2
+    echo "error: distribution name '$DIST' must be lowercase letters and" \
+        "digits, words joined by single hyphens" >&2
     exit 1
 fi
 
-OLD_REPO="myorg/my-app"
-OLD_DIST="my-app"
-OLD_IMPORT="my_app"
-OLD_UPPER="MY_APP"
-IMPORT="${DIST//-/_}"
-UPPER="${IMPORT^^}"
+# The rewrite and the leftover check both look for the placeholder text, so a
+# new value that contains it would be rewritten twice or flagged forever.
+for value in "$REPO" "$DIST"; do
+    case "$value" in
+        *myorg* | *my-app* | *my_app*)
+            echo "error: '$value' contains a template placeholder (myorg, my-app, my_app)" >&2
+            exit 1
+            ;;
+    esac
+done
 
-if [[ "$DIST" == "$OLD_DIST" ]]; then
-    echo "error: refusing to rename to the placeholder values" >&2
+# The import name must not shadow something the package or its tests import.
+case "$IMPORT" in
+    tests | src | hypothesis | pyright | pytest | ruff)
+        echo "error: '$IMPORT' collides with a project directory or dev dependency" >&2
+        exit 1
+        ;;
+esac
+if ! uv run --no-project --python 3.14 python -I -c '
+import keyword, sys
+name = sys.argv[1]
+if keyword.iskeyword(name) or keyword.issoftkeyword(name) or name in sys.stdlib_module_names:
+    sys.exit(1)
+' "$IMPORT"; then
+    echo "error: '$IMPORT' is a Python keyword or a standard-library module" >&2
     exit 1
 fi
-
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-cd "$ROOT"
 
 if [[ ! -d "src/$OLD_IMPORT" ]]; then
-    echo "error: src/$OLD_IMPORT not found; has the template already been renamed?" >&2
+    echo "error: src/$OLD_IMPORT not found; this tree is not a fresh template" >&2
+    echo "(if an earlier run failed after renaming, finish by hand from its last step)" >&2
     exit 1
 fi
 
@@ -76,22 +109,21 @@ files_to_rewrite() {
     fi
 }
 
-# Order matters: the repository slug contains the distribution name, so it is
-# rewritten first. Hyphens are not word characters, so \bmy-app\b also matches
-# inside names like my-app-extra; the placeholders are chosen not to occur that
-# way in the template.
+# The slug contains the distribution name, so it is swapped for a token first
+# and the token for the new slug last; the name rewrites never see the slug.
+TOKEN="@@INIT_TEMPLATE_REPO@@"
 while IFS= read -r -d '' file; do
     case "$file" in
         ./scripts/init-template.sh | scripts/init-template.sh) continue ;;
         ./.git/* | .git/*) continue ;;
     esac
-    if grep -q -e "$OLD_REPO" -e "$OLD_DIST" -e "$OLD_IMPORT" -e "$OLD_UPPER" "$file" 2>/dev/null; then
+    if grep -q -e "$OLD_REPO" -e "$OLD_DIST" -e "$OLD_IMPORT" -- "$file" 2>/dev/null; then
         sed -i \
-            -e "s|$OLD_REPO|$REPO|g" \
+            -e "s|$OLD_REPO|$TOKEN|g" \
             -e "s|\\b$OLD_DIST\\b|$DIST|g" \
             -e "s|\\b$OLD_IMPORT\\b|$IMPORT|g" \
-            -e "s|${OLD_UPPER}_|${UPPER}_|g" \
-            "$file"
+            -e "s|$TOKEN|$REPO|g" \
+            -- "$file"
     fi
 done < <(files_to_rewrite)
 
@@ -101,8 +133,10 @@ mv "src/$OLD_IMPORT" "src/$IMPORT"
 echo "==> Dating D-001"
 sed -i "s|REPLACE-DATE|$(date +%F)|" docs/DECISIONS.md
 
-# The todo this script just finished should not outlive it.
+# The todo this script just finished, and the workflow that tests this script,
+# should not outlive it.
 sed -i '/^- Replace the .* placeholders via .*init-template\.sh/d' AGENTS.md
+rm -f .github/workflows/template.yml
 
 # Re-lock under the new name and prove the renamed tree works before the
 # script deletes itself. A half-renamed tree that reports success is worse
@@ -118,22 +152,26 @@ uv run --frozen ruff check .
 uv run --frozen ruff format --check .
 
 echo "==> Verifying no placeholders remain"
-if remaining=$(grep -rIl -e "myorg" -e "$OLD_DIST" -e "$OLD_IMPORT" -e "${OLD_UPPER}_" -e "REPLACE-DATE" . \
-        --exclude-dir=.git --exclude-dir=.venv --exclude-dir='*cache*' \
-        --exclude="$(basename "$0")" 2>/dev/null); then
-    echo "error: placeholder values still present in:" >&2
+# grep exits 0 on a match, 1 on none, and 2 on an error; only 1 is clean.
+status=0
+remaining=$(grep -rIl -e "myorg" -e "$OLD_DIST" -e "$OLD_IMPORT" -e "REPLACE-DATE" . \
+    --exclude-dir=.git --exclude-dir=.venv --exclude-dir='*cache*' \
+    --exclude=init-template.sh) || status=$?
+if [[ "$status" -ne 1 ]]; then
+    echo "error: placeholder check failed (grep status $status):" >&2
     echo "$remaining" >&2
-    echo "the tree is only partly renamed; fix these before rerunning" >&2
+    echo "the tree is only partly renamed; fix these by hand" >&2
     exit 1
 fi
 
 echo "==> Removing init script"
-rm -- "$0"
+rm -- "$SELF"
 
 echo
 echo "Done. Recommended next steps:"
 echo "  1) Confirm LICENSE fits this project (the template ships MIT)."
-echo "  2) Edit AGENTS.md to reflect this project's architecture and conventions."
-echo "  3) Edit README.md (replace this template's content with your project's README)."
-echo "  4) pre-commit install"
-echo "  5) git add -A && git commit -m 'chore: initial commit from repo_template_py'"
+echo "  2) Write the description in pyproject.toml and src/$IMPORT/cli.py."
+echo "  3) Edit AGENTS.md to reflect this project's architecture and conventions."
+echo "  4) Edit README.md (replace this template's content with your project's README)."
+echo "  5) pre-commit install"
+echo "  6) git add -A && git commit -m 'chore: initial commit from repo_template_py'"

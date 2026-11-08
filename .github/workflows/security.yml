@@ -1,7 +1,8 @@
 name: Security Scans
 
 # Defense-in-depth scans complementing the checks in validate.yml:
-#   - Trivy filesystem scan: CVEs in the locked dependencies (uv.lock), IaC misconfigs
+#   - Trivy filesystem scan: CVEs in the locked runtime dependencies (uv.lock)
+#     and secrets in the tree (Trivy's default scanners; no misconfig scan)
 #   - TruffleHog: secret detection on the PR diff (gitleaks runs locally
 #     via pre-commit; this is the CI gate for anyone who bypasses it)
 #   - Zizmor: GitHub Actions workflow security audit
@@ -61,10 +62,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: TruffleHog diff scan
-        uses: trufflesecurity/trufflehog@27b0417c16317ca9a472a9a8092acce143b49c55 # v3.95.9
+        uses: trufflesecurity/trufflehog@ea68ca03c865c5f324e86e849ced20ed3cf9dbbb # v3.99.8
         with:
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
+          # The action runs the scanner image at this tag, and defaults to
+          # `latest`, which the SHA pin above does not cover. Keep it equal to
+          # the action's tag when Renovate bumps the pin.
+          version: 3.99.8
+          # Verified and unknown results only: unverifiable generic keys are
+          # too noisy to gate on and are left to gitleaks at pre-commit.
           extra_args: --results=verified,unknown
 
   zizmor:

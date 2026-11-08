@@ -47,3 +47,11 @@ jobs:
 
       - name: Test
         run: uv run --frozen pytest
+
+      # The tests run against the editable install from `uv sync`, which reads
+      # src/ directly; only the built wheel shows what users get. Build it and
+      # run its console script in an environment that holds nothing else.
+      - name: Build and run the wheel
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/dist"
+          uv run --isolated --no-project --with "$RUNNER_TEMP"/dist/*.whl my-app version
